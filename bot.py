@@ -1,30 +1,37 @@
-import json
 import os
+import json
+import asyncio
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler
+    ApplicationBuilder, CommandHandler,
+    ContextTypes, CallbackQueryHandler
 )
 from mcrcon import MCRcon
 import psutil
 
-# ===== НАСТРОЙКИ =====
+# ===== CONFIG =====
 TOKEN = "8735701354:AAGzxTKxaPUZ17aPNQA-0azzM8PFnHw5huQ"
 OWNER_ID = 1915732631
 
-RCON_HOST = "n42.joinserver.xyz"
+RCON_HOST = "127.0.0.1"
 RCON_PORT = 25642
 RCON_PASSWORD = "tOOX9GB3I5"
 
+LOG_FILE = "bot.log"
 DB_FILE = "db.json"
+MC_LOG = "logs/latest.log"  # путь к логам сервера
 
-# ===== БАЗА ДАННЫХ =====
+# ===== DB =====
 def load_db():
     if not os.path.exists(DB_FILE):
-        return {"admins": [OWNER_ID]}
-    with open(DB_FILE, "r") as f:
+        return {
+            "admins": [OWNER_ID],
+            "mods": [5099481771],
+            "broadcasts": [],
+            "autorestart": 0
+        }
+    with open(DB_FILE) as f:
         return json.load(f)
 
 def save_db():
@@ -33,127 +40,142 @@ def save_db():
 
 db = load_db()
 
-def is_admin(user_id):
-    return user_id in db["admins"] or user_id == OWNER_ID
+# ===== UTILS =====
+def log(text):
+    with open(LOG_FILE, "a") as f:
+        f.write(f"[{datetime.now()}] {text}\n")
 
-# ===== RCON =====
-def send_rcon(command):
+def rcon(cmd):
     try:
-        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            return mcr.command(command)
+        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as m:
+            return m.command(cmd)
     except Exception as e:
-        return f"Ошибка RCON: {e}"
+        return str(e)
 
-# ===== КОМАНДЫ =====
+def is_admin(uid):
+    return uid in db["admins"] or uid == OWNER_ID
+
+def is_mod(uid):
+    return uid in db["mods"] or is_admin(uid)
+
+# ===== COMMANDS =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
+    kb = [
         [InlineKeyboardButton("📊 Статус", callback_data="status")],
         [InlineKeyboardButton("👥 Онлайн", callback_data="online")],
         [InlineKeyboardButton("🔄 Рестарт", callback_data="restart")]
     ]
-
-    await update.message.reply_text(
-        "🎮 Панель управления сервером:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    await update.message.reply_text("Панель:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return await update.message.reply_text("❌ Нет доступа")
-
-    if not context.args:
-        return await update.message.reply_text("⚠️ Укажи команду")
+    uid = update.effective_user.id
+    if not is_admin(uid):
+        return await update.message.reply_text("❌")
 
     command = " ".join(context.args)
-    response = send_rcon(command)
-
-    await update.message.reply_text(f"📨 {response}")
+    log(f"{uid}: {command}")
+    await update.message.reply_text(rcon(command))
 
 async def online(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-
-    response = send_rcon("list")
-    await update.message.reply_text(response)
+    await update.message.reply_text(rcon("list"))
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
-        return
-
     cpu = psutil.cpu_percent()
     ram = psutil.virtual_memory().percent
-
-    await update.message.reply_text(f"CPU: {cpu}%\nRAM: {ram}%")
+    await update.message.reply_text(f"CPU: {cpu}% RAM: {ram}%")
 
 async def say(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update.effective_user.id):
+    if not is_mod(update.effective_user.id):
         return
-
-    if not context.args:
-        return await update.message.reply_text("⚠️ Укажи текст")
-
     text = " ".join(context.args)
-    send_rcon(f"say {text}")
+    rcon(f"say {text}")
+    await update.message.reply_text("OK")
 
-    await update.message.reply_text("✅ Отправлено")
-
-# ===== АДМИНЫ =====
+# ===== ADMINS =====
 async def add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         return
-
-    if not context.args:
-        return await update.message.reply_text("Укажи ID")
-
     uid = int(context.args[0])
+    db["admins"].append(uid)
+    save_db()
+    await update.message.reply_text("admin added")
 
-    if uid not in db["admins"]:
-        db["admins"].append(uid)
-        save_db()
+async def add_mod(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    uid = int(context.args[0])
+    db["mods"].append(uid)
+    save_db()
+    await update.message.reply_text("mod added")
 
-    await update.message.reply_text("✅ Админ добавлен")
+# ===== LOGS =====
+async def logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return
+    if not os.path.exists(LOG_FILE):
+        return await update.message.reply_text("no logs")
 
-async def del_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_ID:
+    with open(LOG_FILE) as f:
+        lines = f.readlines()[-10:]
+    await update.message.reply_text("".join(lines))
+
+# ===== AUTO =====
+async def broadcaster():
+    while True:
+        for msg in db["broadcasts"]:
+            rcon(f"say {msg}")
+        await asyncio.sleep(300)
+
+async def autorestart():
+    while True:
+        if db["autorestart"] > 0:
+            await asyncio.sleep(db["autorestart"])
+            rcon("say Restarting...")
+            rcon("stop")
+        await asyncio.sleep(10)
+
+# ===== MC LOG WATCHER =====
+async def watch_logs(app):
+    if not os.path.exists(MC_LOG):
         return
 
-    if not context.args:
-        return await update.message.reply_text("Укажи ID")
+    with open(MC_LOG, "r") as f:
+        f.seek(0, 2)
 
-    uid = int(context.args[0])
+        while True:
+            line = f.readline()
+            if not line:
+                await asyncio.sleep(1)
+                continue
 
-    if uid == OWNER_ID:
-        return await update.message.reply_text("❌ Нельзя удалить владельца")
+            if "joined the game" in line:
+                await app.bot.send_message(OWNER_ID, f"🟢 {line}")
 
-    if uid in db["admins"]:
-        db["admins"].remove(uid)
-        save_db()
+            if "left the game" in line:
+                await app.bot.send_message(OWNER_ID, f"🔴 {line}")
 
-    await update.message.reply_text("🗑 Админ удалён")
-
-# ===== КНОПКИ =====
+# ===== BUTTONS =====
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    q = update.callback_query
+    await q.answer()
 
-    if not is_admin(query.from_user.id):
-        return await query.edit_message_text("❌ Нет доступа")
+    if not is_mod(q.from_user.id):
+        return await q.edit_message_text("❌")
 
-    if query.data == "status":
+    if q.data == "status":
         cpu = psutil.cpu_percent()
         ram = psutil.virtual_memory().percent
-        await query.edit_message_text(f"CPU: {cpu}%\nRAM: {ram}%")
+        await q.edit_message_text(f"CPU: {cpu}% RAM: {ram}%")
 
-    elif query.data == "online":
-        response = send_rcon("list")
-        await query.edit_message_text(response)
+    elif q.data == "online":
+        await q.edit_message_text(rcon("list"))
 
-    elif query.data == "restart":
-        send_rcon("say Сервер перезапускается...")
-        send_rcon("stop")
-        await query.edit_message_text("🔄 Сервер остановлен")
+    elif q.data == "restart":
+        rcon("say restarting...")
+        rcon("stop")
+        await q.edit_message_text("server stopped")
 
-# ===== ЗАПУСК =====
+# ===== INIT =====
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
@@ -162,8 +184,14 @@ app.add_handler(CommandHandler("online", online))
 app.add_handler(CommandHandler("status", status))
 app.add_handler(CommandHandler("say", say))
 app.add_handler(CommandHandler("addadmin", add_admin))
-app.add_handler(CommandHandler("deladmin", del_admin))
+app.add_handler(CommandHandler("addmod", add_mod))
+app.add_handler(CommandHandler("logs", logs))
 app.add_handler(CallbackQueryHandler(buttons))
 
-print("✅ Бот запущен")
+# запуск фоновых задач
+app.create_task(broadcaster())
+app.create_task(autorestart())
+app.create_task(watch_logs(app))
+
+print("V4 BOT STARTED")
 app.run_polling()
