@@ -11,12 +11,12 @@ from mcrcon import MCRcon
 import psutil
 
 # ===== НАСТРОЙКИ =====
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-OWNER_ID = 123456789
+TOKEN = "8735701354:AAGzxTKxaPUZ17aPNQA-0azzM8PFnHw5huQ"
+OWNER_ID = 1915732631
 
-RCON_HOST = "127.0.0.1"
-RCON_PORT = 25575
-RCON_PASSWORD = "your_rcon_password"
+RCON_HOST = "n42.joinserver.xyz"
+RCON_PORT = 25642
+RCON_PASSWORD = "tOOX9GB3I5"
 
 DB_FILE = "db.json"
 
