@@ -4,7 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 
-TOKEN = "8762834034:AAHrG05E0BUgCU2jRfoigSDtOtO-cJ4Zj5Q”
+TOKEN = "8762834034:AAHrG05E0BUgCU2jRfoigSDtOtO-cJ4Zj5Q"
 ADMIN_ID = 1915732631  # вставь свой Telegram ID
 
 bot = Bot(token=TOKEN)
